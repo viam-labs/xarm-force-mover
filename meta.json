@@ -7,7 +7,7 @@
   "models": [
     {
       "api": "rdk:service:generic",
-      "model": "viam-labs:xarm-force-mover:arm",
+      "model": "viam:xarm-force-mover:arm",
       "short_description": "Moves a ufactory xArm in one direction until load[joint] sign-flips, then calls Stop()."
     }
   ],

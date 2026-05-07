@@ -13,7 +13,7 @@ import (
 	"go.viam.com/rdk/spatialmath"
 )
 
-var ArmMover = resource.NewModel("viam-labs", "xarm-force-mover", "arm")
+var ArmMover = resource.NewModel("viam", "xarm-force-mover", "arm")
 
 func init() {
 	resource.RegisterService(genericservice.API, ArmMover,
