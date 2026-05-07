@@ -1,0 +1,16 @@
+{
+  "$schema": "https://dl.viam.dev/module.schema.json",
+  "module_id": "viam:xarm-force-mover",
+  "visibility": "public",
+  "url": "",
+  "description": "Move a ufactory xArm along an axis until a load value reported by the arm changes sign, then stop.",
+  "models": [
+    {
+      "api": "rdk:service:generic",
+      "model": "viam-labs:xarm-force-mover:arm",
+      "short_description": "Moves a ufactory xArm in one direction until load[joint] sign-flips, then calls Stop()."
+    }
+  ],
+  "entrypoint": "./run.sh",
+  "first_run": ""
+}
