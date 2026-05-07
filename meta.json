@@ -4,13 +4,26 @@
   "visibility": "public",
   "url": "https://github.com/viam-labs/xarm-force-mover",
   "description": "Move a ufactory xArm along an axis until a load value reported by the arm changes sign, then stop.",
+  "markdown_link": "README.md",
+  "entrypoint": "./run.sh",
+  "first_run": "",
   "models": [
     {
       "api": "rdk:service:generic",
       "model": "viam:xarm-force-mover:arm",
+      "markdown_link": "README.md#arm",
       "short_description": "Moves a ufactory xArm in one direction until load[joint] sign-flips, then calls Stop()."
     }
   ],
-  "entrypoint": "./run.sh",
-  "first_run": ""
+  "build": {
+    "build": "make module.tar.gz",
+    "setup": "make setup",
+    "path": "bin/module.tar.gz",
+    "arch": [
+      "linux/amd64",
+      "linux/arm64",
+      "darwin/arm64",
+      "windows/amd64"
+    ]
+  }
 }
