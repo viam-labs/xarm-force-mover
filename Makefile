@@ -13,6 +13,9 @@ clean:
 format:
 	gofmt -w -s .
 
+setup:
+	go mod tidy
+
 update-rdk:
 	go get go.viam.com/rdk@latest
 	go mod tidy
