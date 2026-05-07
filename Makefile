@@ -5,7 +5,7 @@ build:
 	go build -o $(MODULE_BINARY) main.go
 
 module.tar.gz: build
-	tar czf $(BIN_OUTPUT_PATH)/module.tar.gz $(MODULE_BINARY) meta.json run.sh
+	tar czf $(BIN_OUTPUT_PATH)/module.tar.gz $(MODULE_BINARY) meta.json
 
 clean:
 	rm -rf $(BIN_OUTPUT_PATH)
