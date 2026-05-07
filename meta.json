@@ -5,7 +5,7 @@
   "url": "https://github.com/viam-labs/xarm-force-mover",
   "description": "Move a ufactory xArm along an axis until a load value reported by the arm changes sign, then stop.",
   "markdown_link": "README.md",
-  "entrypoint": "./run.sh",
+  "entrypoint": "bin/xarm-force-mover",
   "first_run": "",
   "models": [
     {
@@ -22,8 +22,7 @@
     "arch": [
       "linux/amd64",
       "linux/arm64",
-      "darwin/arm64",
-      "windows/amd64"
+      "darwin/arm64"
     ]
   }
 }
