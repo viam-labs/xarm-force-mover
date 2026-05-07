@@ -8,8 +8,10 @@ import (
 
 	"go.viam.com/rdk/components/arm"
 	"go.viam.com/rdk/logging"
+	"go.viam.com/rdk/referenceframe"
 	"go.viam.com/rdk/resource"
 	genericservice "go.viam.com/rdk/services/generic"
+	"go.viam.com/rdk/services/motion"
 	"go.viam.com/rdk/spatialmath"
 )
 
@@ -24,25 +26,36 @@ func init() {
 }
 
 type Config struct {
-	Arm            string `json:"arm"`
-	PollIntervalMS int    `json:"poll_interval_ms,omitempty"`
+	Arm                      string  `json:"arm"`
+	MotionService            string  `json:"motion_service,omitempty"`
+	PollIntervalMS           int     `json:"poll_interval_ms,omitempty"`
+	LineToleranceMM          float64 `json:"line_tolerance_mm,omitempty"`
+	OrientationToleranceDegs float64 `json:"orientation_tolerance_degs,omitempty"`
 }
 
 func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "arm")
 	}
-	return []string{cfg.Arm}, nil, nil
+	motionName := cfg.MotionService
+	if motionName == "" {
+		motionName = "builtin"
+	}
+	return []string{cfg.Arm, motion.Named(motionName).String()}, nil, nil
 }
 
 type armMover struct {
 	resource.AlwaysRebuild
 
-	name   resource.Name
-	logger logging.Logger
-	arm    arm.Arm
+	name      resource.Name
+	logger    logging.Logger
+	arm       arm.Arm
+	armName   string
+	motionSvc motion.Service
 
-	pollInterval time.Duration
+	pollInterval             time.Duration
+	lineToleranceMM          float64
+	orientationToleranceDegs float64
 }
 
 func newArmMover(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (resource.Resource, error) {
@@ -56,14 +69,33 @@ func newArmMover(ctx context.Context, deps resource.Dependencies, rawConf resour
 		return nil, fmt.Errorf("failed to get arm %q: %w", conf.Arm, err)
 	}
 
+	motionName := conf.MotionService
+	if motionName == "" {
+		motionName = "builtin"
+	}
+	motionSvc, err := motion.FromProvider(deps, motionName)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get motion service %q: %w", motionName, err)
+	}
+
 	m := &armMover{
-		name:         rawConf.ResourceName(),
-		logger:       logger,
-		arm:          a,
-		pollInterval: 50 * time.Millisecond,
+		name:                     rawConf.ResourceName(),
+		logger:                   logger,
+		arm:                      a,
+		armName:                  conf.Arm,
+		motionSvc:                motionSvc,
+		pollInterval:             50 * time.Millisecond,
+		lineToleranceMM:          10.0,
+		orientationToleranceDegs: 5.0,
 	}
 	if conf.PollIntervalMS > 0 {
 		m.pollInterval = time.Duration(conf.PollIntervalMS) * time.Millisecond
+	}
+	if conf.LineToleranceMM > 0 {
+		m.lineToleranceMM = conf.LineToleranceMM
+	}
+	if conf.OrientationToleranceDegs > 0 {
+		m.orientationToleranceDegs = conf.OrientationToleranceDegs
 	}
 
 	return m, nil
@@ -113,10 +145,11 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 		return nil, fmt.Errorf("target must be a number, got %T", targetRaw)
 	}
 
-	startPose, err := m.arm.EndPosition(ctx, nil)
+	startPIF, err := m.motionSvc.GetPose(ctx, m.armName, referenceframe.World, nil, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to get arm position: %w", err)
+		return nil, fmt.Errorf("failed to get arm world pose: %w", err)
 	}
+	startPose := startPIF.Pose()
 	targetPoint := startPose.Point()
 	switch axis {
 	case "x":
@@ -126,11 +159,26 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 	case "z":
 		targetPoint.Z = target
 	}
-	targetPose := spatialmath.NewPose(targetPoint, startPose.Orientation())
+	destination := referenceframe.NewPoseInFrame(
+		referenceframe.World,
+		spatialmath.NewPose(targetPoint, startPose.Orientation()),
+	)
+	m.logger.Infof("Goal position (world): x=%.2f y=%.2f z=%.2f", targetPoint.X, targetPoint.Y, targetPoint.Z)
+	// constraints := motionplan.NewConstraints(
+	// 	[]motionplan.LinearConstraint{{
+	// 		LineToleranceMm:          m.lineToleranceMM,
+	// 		OrientationToleranceDegs: m.orientationToleranceDegs,
+	// 	}},
+	// 	nil, nil, nil,
+	// )
 
 	moveDone := make(chan error, 1)
 	go func() {
-		moveDone <- m.arm.MoveToPosition(ctx, targetPose, nil)
+		_, mErr := m.motionSvc.Move(ctx, motion.MoveReq{
+			ComponentName: m.armName,
+			Destination:   destination,
+		})
+		moveDone <- mErr
 	}()
 
 	var lastVal *float64
