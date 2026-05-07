@@ -24,30 +24,13 @@ func init() {
 }
 
 type Config struct {
-	Arm            string  `json:"arm"`
-	Axis           string  `json:"axis,omitempty"`
-	Direction      string  `json:"direction,omitempty"`
-	MoveDistanceMM float64 `json:"move_distance_mm,omitempty"`
-	PollIntervalMS int     `json:"poll_interval_ms,omitempty"`
+	Arm            string `json:"arm"`
+	PollIntervalMS int    `json:"poll_interval_ms,omitempty"`
 }
 
 func (cfg *Config) Validate(path string) ([]string, []string, error) {
 	if cfg.Arm == "" {
 		return nil, nil, resource.NewConfigValidationFieldRequiredError(path, "arm")
-	}
-	if cfg.Axis != "" {
-		switch strings.ToLower(cfg.Axis) {
-		case "x", "y", "z":
-		default:
-			return nil, nil, fmt.Errorf("%s: axis must be one of 'x','y','z', got %q", path, cfg.Axis)
-		}
-	}
-	if cfg.Direction != "" {
-		switch strings.ToLower(cfg.Direction) {
-		case "positive", "negative", "+", "-":
-		default:
-			return nil, nil, fmt.Errorf("%s: direction must be 'positive' or 'negative', got %q", path, cfg.Direction)
-		}
 	}
 	return []string{cfg.Arm}, nil, nil
 }
@@ -59,10 +42,7 @@ type armMover struct {
 	logger logging.Logger
 	arm    arm.Arm
 
-	axis           string
-	signMul        float64
-	moveDistanceMM float64
-	pollInterval   time.Duration
+	pollInterval time.Duration
 }
 
 func newArmMover(ctx context.Context, deps resource.Dependencies, rawConf resource.Config, logger logging.Logger) (resource.Resource, error) {
@@ -77,27 +57,10 @@ func newArmMover(ctx context.Context, deps resource.Dependencies, rawConf resour
 	}
 
 	m := &armMover{
-		name:           rawConf.ResourceName(),
-		logger:         logger,
-		arm:            a,
-		axis:           "z",
-		signMul:        -1.0,
-		moveDistanceMM: 500.0,
-		pollInterval:   50 * time.Millisecond,
-	}
-	if conf.Axis != "" {
-		m.axis = strings.ToLower(conf.Axis)
-	}
-	if conf.Direction != "" {
-		switch strings.ToLower(conf.Direction) {
-		case "positive", "+":
-			m.signMul = 1.0
-		case "negative", "-":
-			m.signMul = -1.0
-		}
-	}
-	if conf.MoveDistanceMM != 0 {
-		m.moveDistanceMM = conf.MoveDistanceMM
+		name:         rawConf.ResourceName(),
+		logger:       logger,
+		arm:          a,
+		pollInterval: 50 * time.Millisecond,
 	}
 	if conf.PollIntervalMS > 0 {
 		m.pollInterval = time.Duration(conf.PollIntervalMS) * time.Millisecond
@@ -109,10 +72,7 @@ func newArmMover(ctx context.Context, deps resource.Dependencies, rawConf resour
 func (m *armMover) Name() resource.Name { return m.name }
 
 func (m *armMover) DoCommand(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
-	if _, ok := cmd["start"]; ok {
-		return m.run(ctx, cmd)
-	}
-	return nil, fmt.Errorf("unknown command: expected key %q", "start")
+	return m.run(ctx, cmd)
 }
 
 func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[string]interface{}, error) {
@@ -129,21 +89,44 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 		return nil, fmt.Errorf("joint must be >= 0, got %d", joint)
 	}
 
+	axisRaw, ok := cmd["axis"]
+	if !ok {
+		return nil, fmt.Errorf("axis is required in DoCommand args")
+	}
+	axisStr, ok := axisRaw.(string)
+	if !ok {
+		return nil, fmt.Errorf("axis must be a string, got %T", axisRaw)
+	}
+	axis := strings.ToLower(axisStr)
+	switch axis {
+	case "x", "y", "z":
+	default:
+		return nil, fmt.Errorf("axis must be one of 'x','y','z', got %q", axisStr)
+	}
+
+	targetRaw, ok := cmd["target"]
+	if !ok {
+		return nil, fmt.Errorf("target is required in DoCommand args")
+	}
+	target, ok := targetRaw.(float64)
+	if !ok {
+		return nil, fmt.Errorf("target must be a number, got %T", targetRaw)
+	}
+
 	startPose, err := m.arm.EndPosition(ctx, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get arm position: %w", err)
 	}
-	target := startPose.Point()
-	delta := m.moveDistanceMM * m.signMul
-	switch m.axis {
+	targetPoint := startPose.Point()
+	switch axis {
 	case "x":
-		target.X += delta
+		targetPoint.X = target
 	case "y":
-		target.Y += delta
+		targetPoint.Y = target
 	case "z":
-		target.Z += delta
+		targetPoint.Z = target
 	}
-	targetPose := spatialmath.NewPose(target, startPose.Orientation())
+	targetPose := spatialmath.NewPose(targetPoint, startPose.Orientation())
 
 	moveDone := make(chan error, 1)
 	go func() {
