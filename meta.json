@@ -2,7 +2,7 @@
   "$schema": "https://dl.viam.dev/module.schema.json",
   "module_id": "viam:xarm-force-mover",
   "visibility": "public",
-  "url": "",
+  "url": "https://github.com/viam-labs/xarm-force-mover",
   "description": "Move a ufactory xArm along an axis until a load value reported by the arm changes sign, then stop.",
   "models": [
     {
