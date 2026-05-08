@@ -197,10 +197,10 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 			return nil, fmt.Errorf("move completed without force sign change")
 		case <-ctx.Done():
 			cancelMove()
+			<-moveDone
 			if stopErr := m.arm.Stop(context.Background(), nil); stopErr != nil {
 				m.logger.Warnw("failed to stop arm on context cancellation", "error", stopErr)
 			}
-			<-moveDone
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
@@ -208,10 +208,10 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 		val, err := m.readForce(ctx, joint)
 		if err != nil {
 			cancelMove()
+			<-moveDone
 			if stopErr := m.arm.Stop(context.Background(), nil); stopErr != nil {
 				m.logger.Warnw("failed to stop arm after readForce error", "error", stopErr)
 			}
-			<-moveDone
 			return nil, err
 		}
 
@@ -222,11 +222,11 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 		}
 		if (val < 0) != (*lastVal < 0) {
 			cancelMove()
+			<-moveDone
 			if err := m.arm.Stop(context.Background(), nil); err != nil {
 				return nil, fmt.Errorf("failed to stop arm: %w", err)
 			}
 			m.logger.Infof("Called Stop() after contact detected")
-			<-moveDone
 			endPose, posErr := m.arm.EndPosition(ctx, nil)
 			if posErr != nil {
 				m.logger.Warnw("failed to read end position at contact", "error", posErr)
