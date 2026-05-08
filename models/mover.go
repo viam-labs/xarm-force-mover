@@ -172,9 +172,12 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 	// 	nil, nil, nil,
 	// )
 
+	moveCtx, cancelMove := context.WithCancel(ctx)
+	defer cancelMove()
+
 	moveDone := make(chan error, 1)
 	go func() {
-		_, mErr := m.motionSvc.Move(ctx, motion.MoveReq{
+		_, mErr := m.motionSvc.Move(moveCtx, motion.MoveReq{
 			ComponentName: m.armName,
 			Destination:   destination,
 		})
@@ -193,6 +196,7 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 			}
 			return nil, fmt.Errorf("move completed without force sign change")
 		case <-ctx.Done():
+			cancelMove()
 			if stopErr := m.arm.Stop(context.Background(), nil); stopErr != nil {
 				m.logger.Warnw("failed to stop arm on context cancellation", "error", stopErr)
 			}
@@ -203,6 +207,7 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 
 		val, err := m.readForce(ctx, joint)
 		if err != nil {
+			cancelMove()
 			if stopErr := m.arm.Stop(context.Background(), nil); stopErr != nil {
 				m.logger.Warnw("failed to stop arm after readForce error", "error", stopErr)
 			}
@@ -210,15 +215,22 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 			return nil, err
 		}
 
-		if lastVal != nil && (val < 0) != (*lastVal < 0) {
+		if lastVal == nil {
+			lastVal = &val
+			m.logger.Infof("Baseline force load[%d]=%f", joint, val)
+			continue
+		}
+		if (val < 0) != (*lastVal < 0) {
+			cancelMove()
+			if err := m.arm.Stop(context.Background(), nil); err != nil {
+				return nil, fmt.Errorf("failed to stop arm: %w", err)
+			}
+			m.logger.Infof("Called Stop() after contact detected")
+			<-moveDone
 			endPose, posErr := m.arm.EndPosition(ctx, nil)
 			if posErr != nil {
 				m.logger.Warnw("failed to read end position at contact", "error", posErr)
 			}
-			if err := m.arm.Stop(context.Background(), nil); err != nil {
-				return nil, fmt.Errorf("failed to stop arm: %w", err)
-			}
-			<-moveDone
 			m.logger.Infof("Contact detected: load[%d] sign flip %f -> %f", joint, *lastVal, val)
 			result := map[string]interface{}{
 				"success":     true,
@@ -233,7 +245,6 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 			}
 			return result, nil
 		}
-		lastVal = &val
 	}
 }
 
