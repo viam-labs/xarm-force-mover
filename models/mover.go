@@ -165,11 +165,17 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 	)
 	m.logger.Infof("Goal position (world): x=%.2f y=%.2f z=%.2f", targetPoint.X, targetPoint.Y, targetPoint.Z)
 	// constraints := motionplan.NewConstraints(
-	// 	[]motionplan.LinearConstraint{{
-	// 		LineToleranceMm:          m.lineToleranceMM,
-	// 		OrientationToleranceDegs: m.orientationToleranceDegs,
-	// 	}},
 	// 	nil, nil, nil,
+	// 	[]motionplan.CollisionSpecification{
+	// 		{
+	// 			Allows: []motionplan.CollisionSpecificationAllowedFrameCollisions{
+	// 				{
+	// 					Frame1: "vacuum-gripper:vacuum-gripper-box",
+	// 					Frame2: "table_origin",
+	// 				},
+	// 			},
+	// 		},
+	// 	},
 	// )
 
 	moveCtx, cancelMove := context.WithCancel(ctx)
@@ -223,10 +229,7 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 		if (val < 0) != (*lastVal < 0) {
 			cancelMove()
 			<-moveDone
-			if err := m.arm.Stop(context.Background(), nil); err != nil {
-				return nil, fmt.Errorf("failed to stop arm: %w", err)
-			}
-			m.logger.Infof("Called Stop() after contact detected")
+			m.logger.Infof("would have Called Stop() after contact detected")
 			endPose, posErr := m.arm.EndPosition(ctx, nil)
 			if posErr != nil {
 				m.logger.Warnw("failed to read end position at contact", "error", posErr)
