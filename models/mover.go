@@ -165,16 +165,25 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 	)
 	m.logger.Infof("Goal position (world): x=%.2f y=%.2f z=%.2f", targetPoint.X, targetPoint.Y, targetPoint.Z)
 	// constraints := motionplan.NewConstraints(
-	// 	[]motionplan.LinearConstraint{{
-	// 		LineToleranceMm:          m.lineToleranceMM,
-	// 		OrientationToleranceDegs: m.orientationToleranceDegs,
-	// 	}},
 	// 	nil, nil, nil,
+	// 	[]motionplan.CollisionSpecification{
+	// 		{
+	// 			Allows: []motionplan.CollisionSpecificationAllowedFrameCollisions{
+	// 				{
+	// 					Frame1: "vacuum-gripper:vacuum-gripper-box",
+	// 					Frame2: "table_origin",
+	// 				},
+	// 			},
+	// 		},
+	// 	},
 	// )
+
+	moveCtx, cancelMove := context.WithCancel(ctx)
+	defer cancelMove()
 
 	moveDone := make(chan error, 1)
 	go func() {
-		_, mErr := m.motionSvc.Move(ctx, motion.MoveReq{
+		_, mErr := m.motionSvc.Move(moveCtx, motion.MoveReq{
 			ComponentName: m.armName,
 			Destination:   destination,
 		})
@@ -193,25 +202,38 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 			}
 			return nil, fmt.Errorf("move completed without force sign change")
 		case <-ctx.Done():
-			_ = m.arm.Stop(context.Background(), nil)
+			cancelMove()
 			<-moveDone
+			if stopErr := m.arm.Stop(context.Background(), nil); stopErr != nil {
+				m.logger.Warnw("failed to stop arm on context cancellation", "error", stopErr)
+			}
 			return nil, ctx.Err()
 		case <-ticker.C:
 		}
 
 		val, err := m.readForce(ctx, joint)
 		if err != nil {
-			_ = m.arm.Stop(context.Background(), nil)
+			cancelMove()
 			<-moveDone
+			if stopErr := m.arm.Stop(context.Background(), nil); stopErr != nil {
+				m.logger.Warnw("failed to stop arm after readForce error", "error", stopErr)
+			}
 			return nil, err
 		}
 
-		if lastVal != nil && (val < 0) != (*lastVal < 0) {
-			endPose, _ := m.arm.EndPosition(ctx, nil)
-			if err := m.arm.Stop(context.Background(), nil); err != nil {
-				return nil, fmt.Errorf("failed to stop arm: %w", err)
-			}
+		if lastVal == nil {
+			lastVal = &val
+			m.logger.Infof("Baseline force load[%d]=%f", joint, val)
+			continue
+		}
+		if (val < 0) != (*lastVal < 0) {
+			cancelMove()
 			<-moveDone
+			m.logger.Infof("would have Called Stop() after contact detected")
+			endPose, posErr := m.arm.EndPosition(ctx, nil)
+			if posErr != nil {
+				m.logger.Warnw("failed to read end position at contact", "error", posErr)
+			}
 			m.logger.Infof("Contact detected: load[%d] sign flip %f -> %f", joint, *lastVal, val)
 			result := map[string]interface{}{
 				"success":     true,
@@ -226,7 +248,6 @@ func (m *armMover) run(ctx context.Context, cmd map[string]interface{}) (map[str
 			}
 			return result, nil
 		}
-		lastVal = &val
 	}
 }
 
